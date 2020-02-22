@@ -53,6 +53,8 @@
 //    down the whole thing so we can get back to implementing
 //    features instead of licenses.  Thank you for your time.
 
+//#include "config.h"
+
 #define kVersion "v0.15"
 
 // v0.15: 2018-06-23
@@ -134,12 +136,32 @@
 
 char eliminateCompileErrors = 1;  // fix to suppress arduino build errors
 
+//#include "bas_config.h"
+
+#define ALLOW_SDCARD
+
 // hack to let makefiles work with this file unchanged
 #ifdef FORCE_DESKTOP 
-#undef ARDUINO
-#include "desktop.h"
+  #undef ARDUINO
+  #undef ALLOW_SDCARD
+  #include "desktop.h"
 #else
-#define ARDUINO 1
+  #define ENABLE_SDCARD
+  #define ARDUINO 1
+  #undef ENABLE_EEPROM
+  #ifdef ESP32 && ALLOW_SDCARD
+    #define ENABLE_SDCARD
+
+  #endif       
+#endif
+
+//#undef ENABLE_SDCARD
+
+#ifdef ENABLE_SDCARD
+    #pragma message "enabling sdcard"
+//    #include "FS.h"
+    #include "SD.h"
+    #include "SPI.h"
 #endif
 
 
@@ -148,20 +170,20 @@ char eliminateCompileErrors = 1;  // fix to suppress arduino build errors
 
 // This enables LOAD, SAVE, FILES commands through the Arduino SD Library
 // it adds 9k of usage as well.
-//#define ENABLE_FILEIO 1
-#undef ENABLE_FILEIO
+#define ENABLE_FILEIO 1
+//#undef ENABLE_FILEIO
 
 // this turns on "autorun".  if there's FileIO, and a file "autorun.bas",
 // then it will load it and run it when starting up
 //#define ENABLE_AUTORUN 1
-#undef ENABLE_AUTORUN
+//#undef ENABLE_AUTORUN
 // and this is the file that gets run
 #define kAutorunFilename  "autorun.bas"
 
 // this is the alternate autorun.  Autorun the program in the eeprom.
 // it will load whatever is in the EEProm and run it
 #define ENABLE_EAUTORUN 1
-//#undef ENABLE_EAUTORUN
+#undef ENABLE_EAUTORUN
 
 // this will enable the "TONE", "NOTONE" command using a piezo
 // element on the specified pin.  Wire the red/positive/piezo to the kPiezoPin,
@@ -175,12 +197,15 @@ char eliminateCompileErrors = 1;  // fix to suppress arduino build errors
 // 1kbyte on the '328, and 512 bytes on the '168.  Enabling this here will
 // allow for this funcitonality to work.  Note that this only works on AVR
 // arduino.  Disable it for DUE/other devices.
-#define ENABLE_EEPROM 1
-//#undef ENABLE_EEPROM
+//#define ENABLE_EEPROM 1
+#undef ENABLE_EEPROM
 
 // Sometimes, we connect with a slower device as the console.
 // Set your console D0/D1 baud rate here (9600 baud default)
 #define kConsoleBaud 9600
+#ifdef ESP32
+#define kConsoleBaud 115200
+#endif
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -201,6 +226,7 @@ char eliminateCompileErrors = 1;  // fix to suppress arduino build errors
 
 // Enable memory alignment for certain processers (e.g. some ESP8266-based devices)
 #ifdef ESP8266
+#pragma message "ESP8266 defined"
   // Uses up to one extra byte per program line of memory
   #define ALIGN_MEMORY 1
 #else
@@ -230,7 +256,7 @@ char eliminateCompileErrors = 1;  // fix to suppress arduino build errors
     #include <SPI.h> /* needed as of 1.5 beta */
 
     // set this to the card select for your Arduino SD shield
-    #define kSD_CS 10
+    #define kSD_CS 4
 
     #define kSD_Fail  0
     #define kSD_OK    1
@@ -260,9 +286,15 @@ char eliminateCompileErrors = 1;  // fix to suppress arduino build errors
 
 // set up file includes for things we need, or desktop specific stuff.
 
+#ifdef ESP32
+#pragma message "Using ESP"
+#endif 
+
 #ifdef ARDUINO
   // Use pgmspace/PROGMEM directive to store strings in progmem to save RAM
-  #include <avr/pgmspace.h>
+  #if __has_include(<avr/pgrspace.h>)
+    #include <avr/pgmspace.h>
+  #endif 
 #else
   #include <stdio.h>
   #include <stdlib.h>
@@ -1068,7 +1100,8 @@ void loop()
 #ifdef ARDUINO
 #ifdef ENABLE_EEPROM
   // eprom size
-  printnum( E2END+1 );
+  puts("TODO: figue out E2END");
+  //printnum( E2END+1 );
   printmsg( eeprommsg );
 #endif /* ENABLE_EEPROM */
 #endif /* ARDUINO */
@@ -1367,6 +1400,7 @@ interperateAtTxtpos:
 #endif
 
 #ifdef ARDUINO
+#undef ENABLE_EEPROM
 #ifdef ENABLE_EEPROM
   case KW_EFORMAT:
     goto eformat;
@@ -1399,6 +1433,7 @@ execline:
   goto interperateAtTxtpos;
 
 #ifdef ARDUINO
+#undef ENABLE_EEPROM
 #ifdef ENABLE_EEPROM
 elist:
   {
@@ -1832,7 +1867,8 @@ dwrite:
       digitalWrite( pinNo, value );
     } 
     else {
-      analogWrite( pinNo, value );
+      puts("TODO analogWrite");
+      //analogWrite( pinNo, value );
     }
   }
   goto run_next_statement;
@@ -1849,6 +1885,7 @@ files:
   // version 1: no support for subdirectories
 
 #ifdef ENABLE_FILEIO
+#pragma message "cmd_Files() enabled"
     cmd_Files();
   goto warmstart;
 #else
@@ -2056,6 +2093,7 @@ void setup()
 {
 #ifdef ARDUINO
   Serial.begin(kConsoleBaud);	// opens serial port
+  Serial.println("TinyBasic");
   while( !Serial ); // for Leonardo
   
   Serial.println( sentinel );
@@ -2090,6 +2128,7 @@ void setup()
 #endif /* ENABLE_EAUTORUN */
 #endif /* ENABLE_EEPROM */
 
+  //cmd_Files();
 #endif /* ARDUINO */
 }
 
@@ -2238,6 +2277,7 @@ static int initSD( void )
 #if ENABLE_FILEIO
 void cmd_Files( void )
 {
+  Serial.println("FILES called");
   File dir = SD.open( "/" );
   dir.seek(0);
 
@@ -2248,28 +2288,7 @@ void cmd_Files( void )
       break;
     }
 
-    // common header
-    printmsgNoNL( indentmsg );
-    printmsgNoNL( (const unsigned char *)entry.name() );
-    if( entry.isDirectory() ) {
-      printmsgNoNL( slashmsg );
-    }
-
-    if( entry.isDirectory() ) {
-      // directory ending
-      for( int i=strlen( entry.name()) ; i<16 ; i++ ) {
-        printmsgNoNL( spacemsg );
-      }
-      printmsgNoNL( dirextmsg );
-    }
-    else {
-      // file ending
-      for( int i=strlen( entry.name()) ; i<17 ; i++ ) {
-        printmsgNoNL( spacemsg );
-      }
-      printUnum( entry.size() );
-    }
-    line_terminator();
+  Serial.println(entry.name());
     entry.close();
   }
   dir.close();
